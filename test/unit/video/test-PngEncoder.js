@@ -8,17 +8,17 @@ var EventEmitter = require('events').EventEmitter;
 
 test('PngEncoder', {
   before: function() {
-    this.fakeFfmpeg = new EventEmitter();
+    this.fakeConverter = new EventEmitter();
 
-    this.fakeFfmpeg.stdin       = new EventEmitter();
-    this.fakeFfmpeg.stdin.write = sinon.stub();
-    this.fakeFfmpeg.stdin.end   = sinon.stub();
+    this.fakeConverter.stdin       = new EventEmitter();
+    this.fakeConverter.stdin.write = sinon.stub();
+    this.fakeConverter.stdin.end   = sinon.stub();
 
-    this.fakeFfmpeg.stdout = {pipe: sinon.spy()};
-    this.fakeFfmpeg.stderr = {pipe: sinon.spy()};
+    this.fakeConverter.stdout = {pipe: sinon.spy()};
+    this.fakeConverter.stderr = {pipe: sinon.spy()};
 
     this.fakeSpawn = sinon.stub();
-    this.fakeSpawn.returns(this.fakeFfmpeg);
+    this.fakeSpawn.returns(this.fakeConverter);
 
     this.fakePngSplitter = new EventEmitter();
 
@@ -47,18 +47,37 @@ test('PngEncoder', {
     assert.equal(typeof this.encoder.pipe, 'function');
   },
 
-  'first write() spawns ffmpeg': function() {
+  'uses ffmpeg as default converter': function () {
+    this.encoder.write(new Buffer('foo'));
+
+    assert.equal(this.fakeSpawn.callCount, 1);
+    assert.equal(this.fakeSpawn.getCall(0).args[0], 'ffmpeg');
+  },
+
+  'uses specified converter': function () {
+    var encoder = new PngEncoder({
+      spawn: this.fakeSpawn,
+      converterPath: '/usr/bin/avconv'
+    });
+
+    encoder.write(new Buffer('foo'));
+
+    assert.equal(this.fakeSpawn.callCount, 1);
+    assert.equal(this.fakeSpawn.getCall(0).args[0], '/usr/bin/avconv');
+  },
+
+  'first write() spawns converter': function() {
     this.encoder.write(new Buffer('foo'));
 
     assert.equal(this.fakeSpawn.callCount, 1);
     assert.equal(this.fakeSpawn.getCall(0).args[0], 'ffmpeg');
 
-    // Another write does not spawn another ffmpeg
+    // Another write does not spawn another converter
     this.encoder.write(new Buffer('bar'));
     assert.equal(this.fakeSpawn.callCount, 1);
   },
 
-  'write() spawn ffmpeg with the right arguments': function() {
+  'write() spawn converter with the right arguments': function() {
     this.encoder.write(new Buffer('foo'));
 
     var args = this.fakeSpawn.getCall(0).args[1];
@@ -83,10 +102,10 @@ test('PngEncoder', {
     assert.equal(args[args.length - 1], '-');
   },
 
-  'write() pipes ffmpeg.stdout into PngSplitter': function() {
+  'write() pipes converter.stdout into PngSplitter': function() {
     this.encoder.write(new Buffer('foo'));
 
-    var stdoutPipe = this.fakeFfmpeg.stdout.pipe;
+    var stdoutPipe = this.fakeConverter.stdout.pipe;
     assert.equal(stdoutPipe.callCount, 1);
     assert.strictEqual(stdoutPipe.getCall(0).args[0], this.fakePngSplitter);
   },
@@ -106,75 +125,75 @@ test('PngEncoder', {
     assert.strictEqual(dataSpy.getCall(1).args[0], this.fakeBuffer2);
   },
 
-  'handles ffmpeg spawn error': function() {
+  'handles converter spawn error': function() {
     var errorSpy = sinon.spy();
     this.encoder.on('error', errorSpy);
 
     this.encoder.write(new Buffer('foo'));
 
-    // simulate ffmpeg not spawning correctly
+    // simulate converter not spawning correctly
     var error = new Error('ENOENT');
     error.code = 'ENOENT';
-    this.fakeFfmpeg.stdin.emit('error', new Error('EPIPE'));
-    this.fakeFfmpeg.emit('error', error);
+    this.fakeConverter.stdin.emit('error', new Error('EPIPE'));
+    this.fakeConverter.emit('error', error);
 
     assert.equal(errorSpy.callCount, 1);
-    assert.equal(/ffmpeg.*not found/i.test(errorSpy.getCall(0).args[0]), true);
+    assert.equal(/converter.*not found/i.test(errorSpy.getCall(0).args[0]), true);
   },
 
-  'handles ffmpeg not existing': function() {
+  'handles converter not existing': function() {
     var errorSpy = sinon.spy();
     this.encoder.on('error', errorSpy);
 
     this.encoder.write(new Buffer('foo'));
 
-    // simulate ffmpeg not existing
-    this.fakeFfmpeg.stdin.emit('error', new Error('EPIPE'));
-    this.fakeFfmpeg.emit('exit', 127);
+    // simulate converter not existing
+    this.fakeConverter.stdin.emit('error', new Error('EPIPE'));
+    this.fakeConverter.emit('exit', 127);
 
     assert.equal(errorSpy.callCount, 1);
-    assert.equal(/ffmpeg.*not found/i.test(errorSpy.getCall(0).args[0]), true);
+    assert.equal(/converter.*not found/i.test(errorSpy.getCall(0).args[0]), true);
   },
 
-  'handles ffmpeg exit code > 0': function() {
+  'handles converter exit code > 0': function() {
     var errorSpy = sinon.spy();
     this.encoder.on('error', errorSpy);
 
     this.encoder.write(new Buffer('foo'));
 
-    // simulate an ffmpeg error
-    this.fakeFfmpeg.emit('exit', 1);
+    // simulate an converter error
+    this.fakeConverter.emit('exit', 1);
 
     assert.equal(errorSpy.callCount, 1);
-    assert.equal(/ffmpeg.*error/i.test(errorSpy.getCall(0).args[0]), true);
+    assert.equal(/converter.*error/i.test(errorSpy.getCall(0).args[0]), true);
   },
 
-  'handles expected ffmpeg shutdown': function() {
+  'handles expected converter shutdown': function() {
     var endSpy = sinon.spy();
     this.encoder.on('end', endSpy);
 
     this.encoder.write(new Buffer('foo'));
     this.encoder.end();
-    this.fakeFfmpeg.emit('exit', 0);
+    this.fakeConverter.emit('exit', 0);
 
     assert.equal(endSpy.callCount, 1);
   },
 
-  'handles unexpected ffmpeg shutdown with exit code 0': function() {
+  'handles unexpected converter shutdown with exit code 0': function() {
     var errorSpy = sinon.spy();
     this.encoder.on('error', errorSpy);
 
     this.encoder.write(new Buffer('foo'));
-    this.fakeFfmpeg.emit('exit', 0);
+    this.fakeConverter.emit('exit', 0);
 
     assert.equal(errorSpy.callCount, 1);
-    assert.equal(/unexpected.*ffmpeg/i.test(errorSpy.getCall(0).args[0].message), true);
+    assert.equal(/unexpected.*converter/i.test(errorSpy.getCall(0).args[0].message), true);
   },
 
-  'write() passes all data into ffmpeg.stdin': function() {
+  'write() passes all data into converter.stdin': function() {
     this.encoder.write(this.fakeBuffer1);
 
-    var stdin = this.fakeFfmpeg.stdin;
+    var stdin = this.fakeConverter.stdin;
     assert.equal(stdin.write.callCount, 1);
     assert.strictEqual(stdin.write.getCall(0).args[0], this.fakeBuffer1);
 
@@ -183,12 +202,12 @@ test('PngEncoder', {
     assert.strictEqual(stdin.write.getCall(1).args[0], this.fakeBuffer2);
   },
 
-  'write() handles ffmpeg backpressure': function() {
-    this.fakeFfmpeg.stdin.write.returns(true);
+  'write() handles converter backpressure': function() {
+    this.fakeConverter.stdin.write.returns(true);
     var r = this.encoder.write(new Buffer('abc'));
     assert.equal(r, true);
 
-    this.fakeFfmpeg.stdin.write.returns(false);
+    this.fakeConverter.stdin.write.returns(false);
     r = this.encoder.write(new Buffer('abc'));
     assert.equal(r, false);
 
@@ -196,14 +215,14 @@ test('PngEncoder', {
     this.encoder.on('drain', function () {
         drainCalled = true;
     });
-    this.fakeFfmpeg.stdin.emit('drain');
+    this.fakeConverter.stdin.emit('drain');
     assert.ok(drainCalled);
   },
 
-  'write() pipes ffmpeg stderr to log': function() {
+  'write() pipes converter stderr to log': function() {
     this.encoder.write(new Buffer('abc'));
 
-    var stderrPipe = this.fakeFfmpeg.stderr.pipe;
+    var stderrPipe = this.fakeConverter.stderr.pipe;
     assert.equal(stderrPipe.callCount, 1);
     assert.strictEqual(stderrPipe.getCall(0).args[0], this.fakeLog);
   },
@@ -212,17 +231,17 @@ test('PngEncoder', {
     this.encoder = new PngEncoder({spawn: this.fakeSpawn});
 
     this.encoder.write(new Buffer('abc'));
-    assert.equal(this.fakeFfmpeg.stderr.pipe.callCount, 0);
+    assert.equal(this.fakeConverter.stderr.pipe.callCount, 0);
   },
 
-  'end() closes ffmpeg.stdin': function() {
+  'end() closes converter.stdin': function() {
     this.encoder.write(new Buffer('abc'));
     this.encoder.end();
 
-    assert.equal(this.fakeFfmpeg.stdin.end.callCount, 1);
+    assert.equal(this.fakeConverter.stdin.end.callCount, 1);
   },
 
-  'end() does not do anything if there is no ffmpeg yet': function() {
+  'end() does not do anything if there is no converter yet': function() {
     this.encoder.end();
   },
 });

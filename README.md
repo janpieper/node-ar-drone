@@ -121,6 +121,7 @@ Returns a new `Client` object. `options` include:
 * `ip`: The IP of the drone. Defaults to `'192.168.1.1'`.
 * `frameRate`: The frame rate of the PngEncoder. Defaults to `5`.
 * `imageSize`: The image size produced by PngEncoder. Defaults to `null`.
+* `converterPath`: The video converter used by PngEncoder. Defaults to `ffmpeg`.
 
 #### client.createREPL()
 
